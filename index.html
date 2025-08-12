@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<title>대피 3단계 게임</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:linear-gradient(#cfefff,#e9f7ff)}
+  #app{position:relative; width:100vw; height:100vh; overflow:hidden; font-family: Pretendard,system-ui,Apple SD Gothic Neo,sans-serif}
+  .stage{position:absolute; inset:0; display:none}
+  .stage.active{display:block}
+  .bg{position:absolute; inset:0; background-size:contain; background-position:center center; background-repeat:no-repeat}
+  .card{position:absolute; left:8vw; top:8vh; width:55vw; height:78vh; background-size:contain; background-position:left top; background-repeat:no-repeat}
+  .next{position:absolute; right:3vw; top:3vh; width:64px; height:64px; background:url('assets/arrow.png') center/contain no-repeat; display:none; cursor:pointer; z-index:10}
+  .circle{position:absolute; width:20vw; height:20vw; border:14px solid rgba(255,80,90,.85); border-radius:50%; pointer-events:none; transform:translate(-50%,-50%); box-shadow:0 8px 24px rgba(0,0,0,.25)}
+  .drag{position:absolute; right:8vw; bottom:10vh; width:min(28vw,320px); touch-action:none; user-select:none; cursor:grab}
+  .msg{position:absolute; left:50%; bottom:2vh; transform:translateX(-50%); background:rgba(0,0,0,.55); color:#fff; font-weight:600; font-size:16px; padding:10px 14px; border-radius:10px}
+  #s2 .card{left:8vw; top:10vh; width:min(56vw,740px); height:min(76vh,820px)}
+  #s3 .bg{background-size:cover}
+</style>
+</head>
+<body>
+<div id="app">
+  <section id="s1" class="stage active">
+    <div class="bg" style="background-image:url('assets/bg_stage1.png')"></div>
+    <div class="card hit1" aria-label="낮은자세 그림" style="background-image:url('assets/card_lowpose.png')"></div>
+    <div class="next next1" title="다음 단계로"></div>
+  </section>
+
+  <section id="s2" class="stage">
+    <div class="bg" style="background-image:url('assets/bg_blank.png')"></div>
+    <div class="card dropzone" style="background-image:url('assets/card_lowpose.png')"></div>
+    <img class="drag towel" src="assets/towel.png" alt="젖은 수건" />
+    <img class="answer" src="assets/towel_answer.png"
+         style="position:absolute; opacity:0; pointer-events:none;"
+         alt="정답 수건"/>
+    <div class="next next2" title="다음 단계로"></div>
+  </section>
+
+  <section id="s3" class="stage">
+    <div class="bg" style="background-image:url('assets/bg_stairs.png')"></div>
+    <div class="next next3" style="display:none"></div>
+  </section>
+
+  <div class="circle" id="circle" style="display:none"></div>
+  <audio id="snd" src="assets/correct.wav" preload="auto"></audio>
+  <div class="msg" id="hint" style="display:none"></div>
+</div>
+
+<script>
+(function(){
+  const $ = sel => document.querySelector(sel);
+  const app = $('#app');
+  const circle = $('#circle');
+  const snd = $('#snd');
+  const hint = $('#hint');
+
+  // ========== helpers ==========
+  function showCircleAt(px, py, scale=1, duration=1500){
+    const size = Math.min(window.innerWidth, window.innerHeight) * 0.40 * scale;
+    circle.style.width = size + 'px';
+    circle.style.height = size + 'px';
+    circle.style.left = px + 'px';
+    circle.style.top = py + 'px';
+    circle.style.display = 'block';
+    if(duration>0){
+      setTimeout(()=>circle.style.display='none', duration);
+    }
+  }
+  function playCorrect(){ try{ snd.currentTime=0; snd.play(); }catch(e){} }
+  function enableNext(btn, toId){
+    btn.style.display='block';
+    btn.onclick = ()=>goto(toId);
+  }
+  function goto(id){
+    document.querySelectorAll('.stage').forEach(s=>s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+  }
+
+  // ========== Stage 1 ==========
+  let solved1 = false;
+  const s1Card = document.querySelector('#s1 .hit1');
+  const s1Next = document.querySelector('#s1 .next1');
+  s1Card.addEventListener('click', (e)=>{
+    if(solved1) return;
+    solved1 = true;
+    // 큰 원 (요청: 현재보다 2배 느낌)
+    const r = s1Card.getBoundingClientRect();
+    showCircleAt(r.left + r.width*0.55, r.top + r.height*0.55, 1.1);
+    playCorrect();
+    s1Card.style.pointerEvents = 'none'; // 재클릭 방지
+    enableNext(s1Next, 's2');
+  }, {passive:true});
+
+  // ========== Stage 2 (drag & drop) ==========
+  let solved2 = false;
+  const drop = document.querySelector('#s2 .dropzone');
+  const towel = document.querySelector('#s2 .towel');
+  const ans = document.querySelector('#s2 .answer');
+  const s2Next = document.querySelector('#s2 .next2');
+
+  // 비율 보정값 (3209 기준) — 필요시 이 값만 미세조정하면 됨
+  const ANS_SCALE = 0.22;     // 정답 수건의 폭 = drop 폭 * 0.22
+  const ANCHOR_X = 0.36;      // 얼굴 중심 X (drop의 왼쪽에서 비율)
+  const ANCHOR_Y = 0.56;      // 입/코 높이 Y (drop의 위에서 비율)
+  const OFFSET_X = -0.45;     // 정답 left = anchorX - ansW * 0.45
+  const OFFSET_Y = -0.35;     // 정답 top  = anchorY - ansW * 0.35
+
+  let dragging=false, dx=0, dy=0;
+  function p(e){ if(e.touches && e.touches[0]) return {x:e.touches[0].clientX, y:e.touches[0].clientY}; return {x:e.clientX, y:e.clientY}; }
+  function onDown(e){ if(solved2) return; dragging=true; towel.style.cursor='grabbing'; const m=p(e), r=towel.getBoundingClientRect(); dx=m.x-r.left; dy=m.y-r.top; towel.style.position='absolute'; e.preventDefault(); }
+  function onMove(e){ if(!dragging||solved2) return; const m=p(e); towel.style.left=(m.x-dx)+'px'; towel.style.top=(m.y-dy)+'px'; }
+  function onUp(e){
+    if(!dragging||solved2) return; dragging=false; towel.style.cursor='grab';
+    const m=p(e); const dr=drop.getBoundingClientRect();
+    if(m.x>=dr.left && m.x<=dr.right && m.y>=dr.top && m.y<=dr.bottom){
+      // 정답 배치
+      const ansW = dr.width*ANS_SCALE;
+      const ax = dr.left + dr.width*ANCHOR_X;
+      const ay = dr.top  + dr.height*ANCHOR_Y;
+      ans.style.width = ansW + 'px';
+      ans.style.left  = (ax + ansW*OFFSET_X) + 'px';
+      ans.style.top   = (ay + ansW*OFFSET_Y) + 'px';
+      ans.style.opacity = 1;
+
+      playCorrect();
+      solved2 = true;
+      towel.style.pointerEvents='none';
+      enableNext(s2Next, 's3');
+    }
+  }
+  towel.addEventListener('mousedown', onDown);
+  towel.addEventListener('touchstart', onDown, {passive:false});
+  window.addEventListener('mousemove', onMove, {passive:false});
+  window.addEventListener('touchmove', onMove, {passive:false});
+  window.addEventListener('mouseup', onUp);
+  window.addEventListener('touchend', onUp);
+
+  // ========== Stage 3 (stairs) ==========
+  let solved3 = false;
+  const s3 = document.getElementById('s3');
+  s3.addEventListener('click', (e)=>{
+    if(!document.getElementById('s3').classList.contains('active')) return;
+    if(solved3) return;
+    const r = app.getBoundingClientRect();
+    // 우측 박스 전체 (계단)
+    const stair = {left: r.width*0.58, top:r.height*0.20, right:r.width*0.92, bottom:r.height*0.90};
+    const x = e.clientX, y = e.clientY;
+    if(x>=stair.left && x<=stair.right && y>=stair.top && y<=stair.bottom){
+      solved3 = TrueFlag(); // 상태 고정
+      showCircleAt(x,y,1.1,1500);
+      playCorrect();
+      hint.innerText = '모두 정답입니다!';
+      hint.style.display='block';
+      setTimeout(()=>{ hint.style.display='none'; }, 1800);
+      // 더 이상 클릭 불가
+      s3.style.pointerEvents='none';
+    }
+  }, {passive:true});
+
+  function TrueFlag(){ return true; }
+})();</script>
+</body>
+</html>
