@@ -1,0 +1,191 @@
+
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>대피 3단계 게임 v2</title>
+<style>
+  html,body{margin:0;height:100%;background:#cfefff;font-family:system-ui,'Noto Sans KR',sans-serif}
+  #app{position:fixed;inset:0;overflow:hidden;background:#cfefff}
+  .stage{position:absolute;inset:0;display:none}
+  .stage.active{display:block}
+  .bg{position:absolute;inset:0;width:100vw;height:100vh;object-fit:cover}
+  .next{position:absolute;right:2.5vw;top:2.5vh;width:min(12vw,80px);height:auto;display:none;cursor:pointer;z-index:5}
+  .ring{position:absolute;width:26vmin;height:26vmin;border:10px solid rgba(255,64,64,.96);border-radius:50%;pointer-events:none;transform:translate(-50%,-50%);box-shadow:0 0 0 10px rgba(255,64,64,.14);animation:pop .18s ease-out;z-index:4}
+  @keyframes pop{from{transform:translate(-50%,-50%) scale(.7);opacity:.5}to{transform:translate(-50%,-50%) scale(1);opacity:1}}
+  .hint{position:absolute;left:12px;bottom:12px;background:rgba(0,0,0,.45);color:#fff;padding:8px 10px;border-radius:10px;font-size:13px;z-index:6}
+  /* Stage2 layout */
+  #s2 .wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:6vmin 8vmin;gap:6vmin}
+  #girl{flex:0 0 56%;max-height:86vh;object-fit:contain}
+  #towel{flex:0 0 26%;max-height:40vh;object-fit:contain;touch-action:none;cursor:grab}
+  #towel.dragging{opacity:.9;cursor:grabbing}
+  #towelOk{position:absolute;display:none;pointer-events:none;z-index:6}
+  .final{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35);z-index:7}
+  .final .box{background:#fff;border-radius:16px;padding:20px 26px;font-size:22px;font-weight:700;color:#2d3748;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+</style>
+</head>
+<body>
+<div id="app">
+  <section id="s1" class="stage active">
+    <img id="bg1" class="bg" src="assets/s1_bg.webp" alt="낮은자세">
+    <img id="next1" class="next" src="assets/arrow.png" alt="다음">
+    <div class="hint">낮은 자세 그림(왼쪽)을 톡!</div>
+  </section>
+
+  <section id="s2" class="stage">
+    <img class="bg" src="assets/blank.webp" alt="빈 배경">
+    <div class="wrap">
+      <img id="girl" src="assets/lowpose_girl.webp" alt="낮은자세 그림">
+      <img id="towel" src="assets/towel.webp" alt="젖은수건(드래그)">
+    </div>
+    <img id="towelOk" src="assets/towel_ok.webp" alt="젖은수건 정답">
+    <img id="next2" class="next" src="assets/arrow.png" alt="다음">
+    <div class="hint">젖은 수건을 그림 위 아무 곳에 드롭하면 정답! (입/코 위치에 수건이 표시돼요)</div>
+  </section>
+
+  <section id="s3" class="stage">
+    <img id="bg3" class="bg" src="assets/stairs.webp" alt="계단/엘리베이터">
+    <img id="next3" class="next" src="assets/arrow.png" alt="끝">
+  </section>
+
+  <div id="final" class="final"><div class="box">모두 정답입니다!</div></div>
+  <audio id="ok" src="assets/correct.mp3" preload="auto"></audio>
+</div>
+
+<script>
+function mapToDisplayed(imgEl, xPct, yPct){
+  const natW=imgEl.naturalWidth||1000, natH=imgEl.naturalHeight||1000, imgR=natW/natH;
+  const r=imgEl.getBoundingClientRect(), boxW=r.width, boxH=r.height, boxR=boxW/boxH;
+  let drawW,drawH,ox=0,oy=0;
+  if(boxR>imgR){ drawH=boxH; drawW=drawH*imgR; ox=(boxW-drawW)/2; } else { drawW=boxW; drawH=drawW/imgR; oy=(boxH-drawH)/2; }
+  const x=r.left+ox+(xPct/100)*drawW, y=r.top+oy+(yPct/100)*drawH;
+  const short=Math.min(drawW,drawH);
+  return {x,y,short,drawW,drawH,left:r.left+ox,top:r.top+oy};
+}
+function showRing(stageEl, x, y){
+  const ring=document.createElement('div'); ring.className='ring';
+  ring.style.left=x+'px'; ring.style.top=y+'px'; stageEl.appendChild(ring);
+}
+function pointerXY(e){ if(e.touches && e.touches[0]) return {x:e.touches[0].clientX, y:e.touches[0].clientY}; if(e.changedTouches && e.changedTouches[0]) return {x:e.changedTouches[0].clientX, y:e.changedTouches[0].clientY}; return {x:e.clientX, y:e.clientY}; }
+function playOK(){ try{ const a=document.getElementById('ok'); a.currentTime=0; a.play(); }catch(_){} }
+
+// 1단계: 왼쪽 패널(낮은자세 그림) 전체를 클릭 영역으로 확대
+// 박스 값은 배경 내 왼쪽 카드 전체에 맞춘 대략 비율
+const S1_BOX = { x:12, y:11, w:50, h:78 };
+(function(){
+  const stage = document.getElementById('s1');
+  const bg = document.getElementById('bg1');
+  const next = document.getElementById('next1');
+  const handler=(e)=>{
+    const p=pointerXY(e);
+    const m=mapToDisplayed(bg, S1_BOX.x, S1_BOX.y);
+    const x1 = m.left + (S1_BOX.x/100)*m.drawW;
+    const y1 = m.top  + (S1_BOX.y/100)*m.drawH;
+    const x2 = x1 + (S1_BOX.w/100)*m.drawW;
+    const y2 = y1 + (S1_BOX.h/100)*m.drawH;
+    if(p.x>=x1 && p.x<=x2 && p.y>=y1 && p.y<=y2){
+      playOK(); showRing(stage, p.x, p.y);
+      next.style.display='block';
+      next.onclick=()=>{ stage.classList.remove('active'); document.getElementById('s2').classList.add('active'); next.style.display='none'; };
+      stage.removeEventListener('pointerdown', handler);
+      stage.removeEventListener('touchstart', handler);
+      stage.removeEventListener('click', handler);
+    }
+  };
+  stage.addEventListener('pointerdown', handler);
+  stage.addEventListener('touchstart', handler, {passive:true});
+  stage.addEventListener('click', handler);
+})();
+
+// 2단계: '낮은자세 그림' 전체를 드롭존으로 지정
+(function(){
+  const stage = document.getElementById('s2');
+  const girl = document.getElementById('girl');
+  const towel = document.getElementById('towel');
+  const towelOk = document.getElementById('towelOk');
+  const next = document.getElementById('next2');
+
+  let dragging=false, offX=0, offY=0;
+
+  function onDown(e){
+    const p = pointerXY(e);
+    const r = towel.getBoundingClientRect();
+    dragging = true; towel.classList.add('dragging');
+    towel.style.position='absolute'; towel.style.zIndex='6';
+    offX = p.x - r.left; offY = p.y - r.top;
+    moveAt(p.x, p.y);
+    e.preventDefault && e.preventDefault();
+  }
+  function moveAt(x,y){
+    towel.style.left = (x - offX) + 'px';
+    towel.style.top  = (y - offY) + 'px';
+  }
+  function onMove(e){ if(!dragging) return; const p=pointerXY(e); moveAt(p.x,p.y); }
+  function onUp(e){
+    if(!dragging) return;
+    dragging=false; towel.classList.remove('dragging');
+    const g = girl.getBoundingClientRect();
+    const t = towel.getBoundingClientRect();
+    const cx = t.left + t.width/2, cy = t.top + t.height/2;
+    // 드롭존: '낮은자세 그림' 전체
+    if(cx>=g.left && cx<=g.right && cy>=g.top && cy<=g.bottom){
+      // 정답: 수건 정답 이미지를 "입/코" 위치에 표시(고정 박스 비율)
+      const MOUTH = { x:61, y:56, w:18, h:18 }; // % of girl
+      const ox = g.left + (MOUTH.x/100)*g.width;
+      const oy = g.top  + (MOUTH.y/100)*g.height;
+      const ow = (MOUTH.w/100)*g.width;
+      towel.style.display='none';
+      towelOk.style.display='block';
+      towelOk.style.left = (ox + 0.02*ow) + 'px';
+      towelOk.style.top  = (oy + 0.02*ow) + 'px';
+      towelOk.style.width = (ow*0.96) + 'px';
+      playOK();
+      next.style.display='block';
+      next.onclick=()=>{ document.getElementById('s2').classList.remove('active'); document.getElementById('s3').classList.add('active'); next.style.display='none'; };
+      // remove listeners after success
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+    }
+  }
+
+  towel.addEventListener('pointerdown', onDown);
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+  towel.addEventListener('touchstart', onDown, {passive:false});
+  document.addEventListener('touchmove', onMove);
+  document.addEventListener('touchend', onUp);
+})();
+
+// 3단계 로직은 기존 유지 (여기선 진입만)
+(function(){
+  const stage3=document.getElementById('s3');
+  const bg=document.getElementById('bg3');
+  const final=document.getElementById('final');
+  function handler(e){
+    // 대략적인 계단 박스 - 필요시 후속에서 조정
+    const BOX={x:59,y:37,w:22,h:54};
+    const r=bg.getBoundingClientRect();
+    const x1=r.left + (BOX.x/100)*r.width;
+    const y1=r.top  + (BOX.y/100)*r.height;
+    const x2=x1 + (BOX.w/100)*r.width;
+    const y2=y1 + (BOX.h/100)*r.height;
+    const p = (e.touches&&e.touches[0]) ? {x:e.touches[0].clientX,y:e.touches[0].clientY} : {x:e.clientX,y:e.clientY};
+    if(p.x>=x1&&p.x<=x2&&p.y>=y1&&p.y<=y2){
+      playOK();
+      const ring=document.createElement('div'); ring.className='ring'; ring.style.left=p.x+'px'; ring.style.top=p.y+'px'; stage3.appendChild(ring);
+      final.style.display='flex';
+      stage3.removeEventListener('pointerdown', handler);
+      stage3.removeEventListener('touchstart', handler);
+      stage3.removeEventListener('click', handler);
+    }
+  }
+  stage3.addEventListener('pointerdown', handler);
+  stage3.addEventListener('touchstart', handler, {passive:true});
+  stage3.addEventListener('click', handler);
+})();
+</script>
+</body>
+</html>
