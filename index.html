@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<title>낮은자세-수건-계단 3단계 게임</title>
+<style>
+  :root{
+    --bg:#cfe6f6;
+    --ring:#ff6b6b;
+    --shadow: rgba(0,0,0,.2);
+  }
+  html,body{height:100%;margin:0}
+  body{background:linear-gradient(#cfe9ff,#cfe9ff 40%,#d8f0ff);font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif;}
+  #app{position:relative; width:100vw; height:100vh; overflow:hidden;}
+  .stage{position:absolute; inset:0; display:none;}
+  .stage.active{display:block;}
+  .img-fit{position:absolute; inset:0; width:100%; height:100%; object-fit:contain; user-select:none; -webkit-user-drag:none; pointer-events:none;}
+  .hint{position:absolute; left:12px; bottom:12px; background:rgba(0,0,0,.35); color:#fff; padding:.45rem .7rem; border-radius:.6rem; font-size:.9rem}
+  .next{position:absolute; right:24px; top:18px; width:64px; height:64px; cursor:pointer; display:none; z-index:30;}
+  .next img{width:100%; height:100%; object-fit:contain; filter: drop-shadow(0 0 8px rgba(0,0,0,.15));}
+  .ring{position:absolute; border:10px solid var(--ring); border-radius:50%; box-shadow:0 6px 14px rgba(0,0,0,.1); z-index:20; pointer-events:none; animation:pop .25s ease-out;}
+  @keyframes pop{from{transform:scale(.7); opacity:.5} to{transform:scale(1); opacity:1}}
+
+  /* Stage 2 layout */
+  .s2-wrap{position:absolute; inset:0; display:grid; grid-template-columns:1fr 1fr; align-items:center; gap:2vw; padding:5vh 6vw;}
+  .s2-left{position:relative; width:100%; height:80vh; display:flex; align-items:center; justify-content:center;}
+  .s2-left img{max-height:100%; max-width:100%; object-fit:contain;}
+  .drop-zone{position:absolute; border-radius:12px; /* invisible touch area */}
+  .drag{position:absolute; right:6vw; bottom:10vh; width:min(28vw,420px); max-width:44vw; touch-action:none; cursor:grab; z-index:12;}
+  .drag:active{cursor:grabbing;}
+  .answer-cloth{position:absolute; display:none; z-index:11;}
+  .toast{position:absolute; left:50%; bottom:9vh; transform:translateX(-50%); background:rgba(0,0,0,.6); color:#fff; padding:10px 14px; border-radius:999px; font-size:1rem; display:none; z-index:40;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage1" class="stage active">
+    <img id="s1bg" class="img-fit" src="assets/낮은자세.png" alt="낮은자세 배경"/>
+    <div id="s1Hit" style="position:absolute; inset:0"></div>
+    <div id="s1Ring" class="ring" style="display:none"></div>
+    <div class="hint">낮은 자세 그림을 눌러 보세요.</div>
+    <div id="next1" class="next"><img src="assets/화살표.png" alt="next"/></div>
+  </div>
+
+  <div id="stage2" class="stage">
+    <div class="s2-wrap">
+      <div class="s2-left">
+        <img id="s2Person" src="assets/낮은자세_그림.png" alt="낮은자세 그림"/>
+        <img id="s2Answer" class="answer-cloth" src="assets/젖은수건_정답.png" alt="젖은수건 정답"/>
+        <div id="s2Drop" class="drop-zone"></div>
+      </div>
+      <img id="towel" class="drag" src="assets/젖은수건.png" alt="젖은 수건"/>
+    </div>
+    <div id="next2" class="next"><img src="assets/화살표.png" alt="next"/></div>
+    <div class="hint">수건을 낮은 자세 그림 위에 드롭하면 정답! (드롭 후 수건은 사라져요)</div>
+  </div>
+
+  <div id="stage3" class="stage">
+    <img id="s3bg" class="img-fit" src="assets/대피하기_계단_엘베.png" alt="계단/엘베"/>
+    <div id="s3Hit" style="position:absolute; inset:0"></div>
+    <div id="s3Ring" class="ring" style="display:none"></div>
+    <div id="finalToast" class="toast">모두 정답입니다!</div>
+  </div>
+</div>
+
+<audio id="correct">
+  <source src="assets/정답sound.wav" type="audio/wav">
+</audio>
+
+<script>
+  const app = document.getElementById('app');
+  const correct = document.getElementById('correct');
+
+  // Utilities
+  const playCorrect = () => { try{ correct.currentTime = 0; correct.play(); }catch(e){} };
+  const showRing = (ringEl, rect) => {
+    ringEl.style.left = (rect.left + rect.width*0.5 - Math.min(rect.width, rect.height)*0.5*0.9) + 'px';
+    ringEl.style.top  = (rect.top  + rect.height*0.5 - Math.min(rect.width, rect.height)*0.5*0.9) + 'px';
+    const size = Math.min(rect.width, rect.height)*0.9;
+    ringEl.style.width = size + 'px';
+    ringEl.style.height = size + 'px';
+    ringEl.style.display = 'block';
+  };
+
+  // --- Stage 1 ---
+  let s1Solved = false;
+  const s1bg = document.getElementById('s1bg');
+  const s1Hit = document.getElementById('s1Hit');
+  const s1Ring = document.getElementById('s1Ring');
+  const next1 = document.getElementById('next1');
+
+  function computeS1Rect(){
+    // Compute the displayed rect of the left panel inside s1bg (based on empirical percentages)
+    const r = s1bg.getBoundingClientRect();
+    // approximate: left panel ~ from 21% to 49% of image width, 18% to 85% height
+    const left = r.left + r.width * 0.215;
+    const top = r.top + r.height * 0.15;
+    const width = r.width * 0.33;
+    const height = r.height * 0.74;
+    return {left, top, width, height, right:left+width, bottom:top+height};
+  }
+
+  function inRect(x,y,rect){ return x>=rect.left && x<=rect.right && y>=rect.top && y<=rect.bottom; }
+
+  function s1Bind(){
+    function handler(ev){
+      if(s1Solved) return;
+      const pt = (ev.touches? ev.touches[0]: ev);
+      const rect = computeS1Rect();
+      if(inRect(pt.clientX, pt.clientY, rect)){
+        s1Solved = true;
+        showRing(s1Ring, rect);
+        playCorrect();
+        next1.style.display = 'block';
+        s1Hit.style.pointerEvents = 'none'; // disable re-click
+      }
+    }
+    s1Hit.addEventListener('click', handler);
+    s1Hit.addEventListener('touchstart', handler, {passive:true});
+  }
+
+  next1.addEventListener('click', ()=>gotoStage(2));
+
+  // --- Stage 2 ---
+  let s2Solved = false;
+  const s2 = document.getElementById('stage2');
+  const towel = document.getElementById('towel');
+  const s2Person = document.getElementById('s2Person');
+  const s2Answer = document.getElementById('s2Answer');
+  const s2Drop = document.getElementById('s2Drop');
+  const next2 = document.getElementById('next2');
+
+  function updateDropZone(){
+    const pr = s2Person.getBoundingClientRect();
+    s2Drop.style.left = pr.left + 'px';
+    s2Drop.style.top = pr.top + 'px';
+    s2Drop.style.width = pr.width + 'px';
+    s2Drop.style.height = pr.height + 'px';
+  }
+
+  function placeAnswerCloth(){
+    // Place answer cloth over mouth area (tuned with percentages). Also scaled to 60% of previous (roughly 0.18W)
+    const pr = s2Person.getBoundingClientRect();
+    const w = pr.width * 0.18 * 0.60/0.18; // simply pr.width*0.18*1 (clarity)
+    const width = pr.width * 0.18 * 0.60 + 0; // 60% of an 18% base width
+    s2Answer.style.width = width + 'px';
+    // position: around mouth area ~ 38% x, 56% y of image (fine-tuned)
+    const left = pr.left + pr.width * 0.37;
+    const top  = pr.top  + pr.height* 0.50;
+    s2Answer.style.left = left + 'px';
+    s2Answer.style.top = top + 'px';
+  }
+
+  // Simple drag
+  function enableDrag(el){
+    let ox=0, oy=0, dragging=false;
+    const start = (e)=>{
+      if(s2Solved) return;
+      dragging=true;
+      const p = (e.touches? e.touches[0]: e);
+      const r = el.getBoundingClientRect();
+      ox = p.clientX - r.left;
+      oy = p.clientY - r.top;
+      document.addEventListener('mousemove', move);
+      document.addEventListener('touchmove', move, {passive:false});
+      document.addEventListener('mouseup', end);
+      document.addEventListener('touchend', end);
+    };
+    const move = (e)=>{
+      if(!dragging) return;
+      const p = (e.touches? e.touches[0]: e);
+      e.preventDefault && e.preventDefault();
+      const x = p.clientX - ox;
+      const y = p.clientY - oy;
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+    };
+    const end = (e)=>{
+      dragging=false;
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('touchmove', move);
+      document.removeEventListener('mouseup', end);
+      document.removeEventListener('touchend', end);
+      checkDrop();
+    };
+    el.addEventListener('mousedown', start);
+    el.addEventListener('touchstart', start, {passive:true});
+  }
+
+  function centerPoint(el){
+    const r = el.getBoundingClientRect();
+    return {x:r.left+r.width/2, y:r.top+r.height/2};
+  }
+
+  function checkDrop(){
+    if(s2Solved) return;
+    const pr = s2Person.getBoundingClientRect();
+    const cz = {left:pr.left, top:pr.top, right:pr.right, bottom:pr.bottom};
+    const c = centerPoint(towel);
+    if(inRect(c.x, c.y, cz)){
+      // success
+      s2Solved = true;
+      towel.style.display='none';
+      placeAnswerCloth();
+      s2Answer.style.display='block';
+      playCorrect();
+      next2.style.display='block';
+      s2Drop.style.pointerEvents='none';
+    }
+  }
+
+  next2.addEventListener('click', ()=>gotoStage(3));
+
+  // --- Stage 3 ---
+  let s3Solved = false;
+  const s3bg = document.getElementById('s3bg');
+  const s3Hit = document.getElementById('s3Hit');
+  const s3Ring = document.getElementById('s3Ring');
+  const finalToast = document.getElementById('finalToast');
+
+  function computeS3Rect(){
+    const r = s3bg.getBoundingClientRect();
+    // Assume stairs are on right portion of image
+    const left = r.left + r.width * 0.56;
+    const top = r.top + r.height * 0.15;
+    const width = r.width * 0.30;
+    const height = r.height * 0.75;
+    return {left, top, width, height, right:left+width, bottom:top+height};
+  }
+
+  function s3Bind(){
+    function handler(ev){
+      if(s3Solved) return;
+      const pt = (ev.touches? ev.touches[0]: ev);
+      const rect = computeS3Rect();
+      if(inRect(pt.clientX, pt.clientY, rect)){
+        s3Solved = true;
+        showRing(s3Ring, rect);
+        playCorrect();
+        finalToast.style.display='block';
+        s3Hit.style.pointerEvents='none';
+      }
+    }
+    s3Hit.addEventListener('click', handler);
+    s3Hit.addEventListener('touchstart', handler, {passive:true});
+  }
+
+  // --- Stage Switch ---
+  function gotoStage(n){
+    document.querySelectorAll('.stage').forEach(s=>s.classList.remove('active'));
+    document.getElementById('stage'+n).classList.add('active');
+    if(n===1){
+      requestAnimationFrame(updateS1OnResize);
+    }else if(n===2){
+      requestAnimationFrame(()=>{ updateDropZone(); placeAnswerCloth(); });
+    }else if(n===3){
+      requestAnimationFrame(updateS3OnResize);
+    }
+  }
+
+  function updateS1OnResize(){ /* just to update ring position on resize if needed */ }
+  function updateS3OnResize(){ /* no-op, rect computed on click */ }
+
+  function onResize(){
+    if(document.getElementById('stage1').classList.contains('active')){
+      // nothing visual until click
+    } else if(document.getElementById('stage2').classList.contains('active')){
+      updateDropZone();
+      if(s2Solved) placeAnswerCloth();
+    }
+  }
+  window.addEventListener('resize', onResize);
+
+  // init
+  s1bg.addEventListener('load', s1Bind);
+  s3bg.addEventListener('load', s3Bind);
+  enableDrag(towel);
+</script>
+</body>
+</html>
