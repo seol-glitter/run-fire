@@ -1,0 +1,35 @@
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;}
+body{
+  font-family:system-ui, -apple-system, segoue UI, Roboto, sans-serif;
+  background:linear-gradient(#cfe8f6,#cfe8f6 40%,#d9effb 100%);
+  overflow:hidden;
+}
+.app{position:relative;width:100%;height:100%;}
+.loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:28px;color:#222}
+
+.stage{position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:4vmin}
+.stage.active{display:flex}
+
+.card{position:relative;max-width:min(90vw,1100px);width:100%;height:100%;display:flex;align-items:center;justify-content:center;gap:6vmin}
+
+.panel{position:relative;flex:0 0 auto;width:min(34vw,420px);aspect-ratio:3/4;border:0}
+.panel img{width:100%;height:100%;object-fit:contain;display:block}
+
+.arrow{position:absolute;top:2.5vmin;right:3vmin;width:7vmin;aspect-ratio:1/1;cursor:pointer;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25));display:none}
+.arrow.show{display:block}
+
+.circle{position:absolute;border:12px solid rgba(255,80,80,.6);border-radius:999px;pointer-events:none;animation:pop .25s ease-out}
+@keyframes pop{from{transform:scale(.8);opacity:.7}to{transform:scale(1);opacity:1}}
+
+.hint{position:absolute;left:1rem;bottom:1rem;background:rgba(0,0,0,.25);color:#fff;padding:.4rem .8rem;border-radius:.8rem;font-size:14px}
+
+#stage2 .board{position:relative;flex:1;display:flex;align-items:center;gap:4vmin}
+.leftZone{position:relative;width:min(55vw,820px);max-width:820px;aspect-ratio:1/1.05}
+.leftZone img.bg{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.dropMask{position:absolute;inset:0;border-radius:1rem;/* 드롭존 전체 */}
+.towelDrag{position:relative;flex:0 0 auto;width:min(28vw,360px);max-width:360px;user-select:none;touch-action:none;cursor:grab}
+
+.towelSuccess{position:absolute;transform-origin:top left;pointer-events:none;display:none}
+
+.finalMsg{position:absolute;bottom:2.2vmin;right:2.2vmin;background:rgba(0,0,0,.55);color:#fff;padding:.6rem .9rem;border-radius:1rem;font-size:14px;display:none}
