@@ -1,0 +1,9 @@
+
+body {
+    margin: 0;
+    background: #cce0f5;
+}
+#game-container {
+    text-align: center;
+    padding-top: 20px;
+}
