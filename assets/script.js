@@ -1,0 +1,1 @@
+document.getElementById('game-container').innerHTML = '<h1>게임 로드됨</h1>';
