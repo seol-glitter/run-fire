@@ -1,163 +1,242 @@
-(()=>{
-  const cb = `cb=${Date.now()}`;        // cache-bust
-  const A = (p)=> encodeURI(`./assets/${p}`) + `?${cb}`;
+// Hotfix script with robust asset loading and only Stage 2 success overlay adjustment
+(function(){
+  const v = 'hotfix7';
+  const BASES = ['assets/', '']; // try assets/ first, then root
+  const A = {
+    step1_bg: '빈화면.png',
+    step1_left: '낮은자세.png',
+    step1_click: '낮은자세 그림.png',
 
-  const stage = document.getElementById('stage');
-  const nextBtn = document.getElementById('nextBtn');
-  const toast = document.getElementById('toast');
+    step2_bg: '빈화면.png',
+    step2_pose: '낮은자세 그림.png',
+    step2_cloth: '젖은수건이미지.png',
+    step2_success: '젖은수건정답이미지.png',
 
-  let step=1;
+    step3_bg: '대피하기_계단_엘베.png',
 
-  const showToast=(msg)=>{ toast.textContent = msg; };
-
-  // ------- reusable helpers -------
-  const mk = (tag,cls)=>{ const el=document.createElement(tag); if(cls) el.className=cls; return el; };
-  const placeCircle=(parent, x,y, d)=>{
-    const c = mk('div','circle persist');
-    c.style.width = c.style.height = d+'px';
-    c.style.left = (x-d/2)+'px';
-    c.style.top  = (y-d/2)+'px';
-    parent.appendChild(c);
-    return c;
+    arrow: '화살표.png',
+    ok: '정답sound.wav'
   };
 
-  const clearStage=()=>{ stage.innerHTML=''; nextBtn.classList.add('hidden'); };
+  const app = document.getElementById('app');
+  const stage = document.getElementById('stage');
+  const loadingEl = document.getElementById('loading');
+  const okAudio = document.getElementById('okSound');
 
-  nextBtn.addEventListener('click', ()=>{ step++; render(); });
-
-  function render(){
-    clearStage();
-    if(step===1) renderStep1();
-    else if(step===2) renderStep2();
-    else renderStep3();
+  function urlFor(name){
+    // try multiple bases, return the first that loads
+    const enc = encodeURI(name);
+    const tries = BASES.map(b => `${b}${enc}`);
+    return tries;
   }
 
-  // ----------------- STEP 1 -----------------
-  function renderStep1(){
-    const sc = mk('div','scene'); stage.appendChild(sc);
-    const bg = mk('img','full'); bg.alt='배경'; bg.src=A('빈화면.png'); sc.appendChild(bg);
+  function preload(list, cb){
+    let remain = list.length, anyLoaded=false, errors=[];
+    const resolved = {};
+    list.forEach(key=>{
+      const candidates = urlFor(A[key]);
+      let i=0, done=false;
+      (function tryNext(){
+        if(i>=candidates.length){
+          errors.push({key, tried:candidates});
+          check(); return;
+        }
+        const u = candidates[i] + `?v=${v}`;
+        const img = new Image();
+        img.onload = ()=>{ if(!done){ done=true; anyLoaded=true; resolved[key]=u; check(); } };
+        img.onerror = ()=>{ i++; tryNext(); };
+        img.src = u;
+      })();
+    });
+    function check(){
+      remain--;
+      if(remain<=0){
+        if(!anyLoaded && errors.length){
+          showFatal(errors);
+        } else {
+          cb(resolved, errors);
+        }
+      }
+    }
+  }
 
-    const low = mk('img','center'); low.id='low1'; low.src=A('낮은자세.png'); low.alt='낮은 자세'; sc.appendChild(low);
+  function showFatal(errors){
+    stage.innerHTML = '';
+    const box = document.createElement('div');
+    box.style.cssText='position:absolute;inset:10% 10%;background:#fff;border-radius:14px;padding:20px;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.15)';
+    box.innerHTML = `<h2>리소스 경로 문제</h2>
+      <p>아래 항목의 파일을 찾지 못했습니다. 리포지토리에 <b>assets</b> 폴더가 있고 파일명이 정확한지 확인해주세요.</p>
+      <pre style="white-space:pre-wrap;font-size:13px;background:#f6f6f6;padding:10px;border-radius:8px;max-height:60vh;overflow:auto;">${errors.map(e=>`${e.key} → ${A[e.key]}\n시도한 경로:\n- ${e.tried.join('\n- ')}`).join('\n\n')}</pre>`;
+    stage.appendChild(box);
+    loadingEl.textContent = '로드 실패';
+  }
 
-    // 클릭 가능한 영역 = '낮은자세 그림' 이미지 박스 전체
-    const hit = mk('img','center'); hit.id='hit1'; hit.src=A('낮은자세 그림.png'); hit.style.opacity='0'; sc.appendChild(hit);
+  function nextArrow(onClick){
+    const a = document.createElement('button');
+    a.className = 'arrow';
+    a.addEventListener('click', onClick, {once:true});
+    stage.appendChild(a);
+  }
 
-    let solved=false;
-    hit.addEventListener('load',()=>{
-      // position circle roughly to image center, sized to the hit box
-      const r = hit.getBoundingClientRect();
-      const s = sc.getBoundingClientRect();
-      const d = Math.min(r.width, r.height)*0.82;
-      const x = r.left - s.left + r.width/2;
-      const y = r.top  - s.top  + r.height/2;
-      hit.addEventListener('click',()=>{
-        if(solved) return;
-        solved=true;
-        placeCircle(sc, x, y, d);
-        nextBtn.classList.remove('hidden');
-      }, {once:true});
+  function showCircle(x,y,r){
+    const c = document.createElement('div');
+    c.className='circle';
+    c.style.width = c.style.height = (r*2)+'px';
+    c.style.left = (x-r)+'px';
+    c.style.top = (y-r)+'px';
+    stage.appendChild(c);
+    return c;
+  }
+
+  function px(n){ return Math.round(n) + 'px'; }
+
+  // ---------- Stage implementations ----------
+  function stage1(R){
+    loadingEl.classList.add('hidden');
+    stage.innerHTML = '';
+
+    const bg = document.createElement('div');
+    bg.className='bg';
+    bg.style.backgroundImage = `url('${R.step1_bg}')`;
+    stage.appendChild(bg);
+
+    // Two cards
+    const left = document.createElement('div');
+    left.className='card';
+    left.style.backgroundImage = `url('${R.step1_left}')`;
+    stage.appendChild(left);
+
+    const right = document.createElement('div');
+    right.className='card right';
+    right.style.backgroundImage = `url('${R.step1_left.replace(encodeURI('낮은자세.png'), encodeURI('낮은자세.png'))}')`; // placeholder same style image
+    stage.appendChild(right);
+
+    // Click zone = whole left card
+    left.style.cursor='pointer';
+    left.addEventListener('click', ()=>{
+      const rect = left.getBoundingClientRect();
+      const cx = rect.left + rect.width/2;
+      const cy = rect.top + rect.height/2;
+      const r = Math.min(rect.width, rect.height)*0.48;
+      showCircle(cx,cy,r);
+      try{ okAudio.currentTime=0; okAudio.play(); }catch(e){}
+      // proceed
+      nextArrow(()=>stage2(R));
+    }, {once:true});
+
+    // audio src resolve
+    okAudio.src = urlFor(A.ok)[0] + `?v=${v}`;
+  }
+
+  function stage2(R){
+    stage.innerHTML = '';
+
+    const wrap = document.createElement('div');
+    wrap.id='dragWrap';
+
+    const bg = document.createElement('div');
+    bg.className='bg';
+    bg.style.backgroundImage = `url('${R.step2_bg}')`;
+    stage.appendChild(bg);
+
+    const target = document.createElement('div');
+    target.id='dragTarget';
+    target.style.backgroundImage = `url('${R.step2_pose}')`;
+
+    const drag = document.createElement('div');
+    drag.id='dragItem';
+    drag.style.backgroundImage = `url('${R.step2_cloth}')`;
+
+    const success = document.createElement('div');
+    success.id='successCloth';
+    success.style.backgroundImage = `url('${R.step2_success}')`;
+    success.style.display='none';
+
+    wrap.appendChild(target);
+    wrap.appendChild(drag);
+    stage.appendChild(wrap);
+    stage.appendChild(success);
+
+    const hint = document.createElement('div');
+    hint.className='hint';
+    hint.textContent='수건을 낮은 자세 그림 위에 드롭하면 정답! (드롭 후 수건은 사라져요)';
+    stage.appendChild(hint);
+
+    // drag
+    let dragging=false, sx=0, sy=0, ox=0, oy=0;
+    drag.addEventListener('pointerdown', (e)=>{
+      dragging=true; drag.setPointerCapture(e.pointerId);
+      sx=e.clientX; sy=e.clientY;
+      const r = drag.getBoundingClientRect();
+      ox=r.left; oy=r.top;
+      drag.style.cursor='grabbing';
+    });
+    window.addEventListener('pointermove',(e)=>{
+      if(!dragging) return;
+      const nx = ox + (e.clientX - sx);
+      const ny = oy + (e.clientY - sy);
+      drag.style.position='absolute';
+      drag.style.left=px(nx); drag.style.top=px(ny);
+    });
+    window.addEventListener('pointerup',(e)=>{
+      if(!dragging) return;
+      dragging=false; drag.releasePointerCapture(e.pointerId);
+      drag.style.cursor='grab';
+      // hit test: whole target
+      const tr = target.getBoundingClientRect();
+      const dr = drag.getBoundingClientRect();
+      const overlap = !(dr.right < tr.left || dr.left > tr.right || dr.bottom < tr.top || dr.top > tr.bottom);
+      if(overlap){
+        // success image placement relative to target
+        const SCALE = 0.60;                 // requested 60%
+        const OFF_X = -0.055;               // left by ~5.5% of target width
+        const OFF_Y = -0.040;               // up by ~4% of target height
+        const w = tr.width * SCALE;
+        const h = w * (1.0);                // assume natural fits; keep square-ish
+        success.style.width = px(w);
+        success.style.height = px(h);
+        success.style.left = px(tr.left + tr.width*0.50 + tr.width*OFF_X);
+        success.style.top  = px(tr.top  + tr.height*0.54 + tr.height*OFF_Y);
+        success.style.display='block';
+        drag.style.display='none'; // remove draggable
+        try{ okAudio.currentTime=0; okAudio.play(); }catch(e){}
+        nextArrow(()=>stage3(R));
+      } else {
+        // snap back
+        drag.style.left=''; drag.style.top=''; drag.style.position='relative';
+      }
     });
   }
 
-  // ----------------- STEP 2 -----------------
-  function renderStep2(){
-    const sc = mk('div','scene'); stage.appendChild(sc);
-    const bg = mk('img','full'); bg.src=A('빈화면.png'); sc.appendChild(bg);
+  function stage3(R){
+    stage.innerHTML = '';
+    const bg = document.createElement('div');
+    bg.className='bg';
+    bg.style.backgroundImage = `url('${R.step3_bg}')`;
+    stage.appendChild(bg);
 
-    // 낮은자세 그림(투명 hit + 시각용 이미지)
-    const pose = mk('img'); pose.id='pose2'; pose.src=A('낮은자세 그림.png'); pose.alt='낮은자세 그림'; sc.appendChild(pose);
-
-    // 드래그할 젖은수건
-    const towel = mk('img'); towel.id='towel'; towel.src=A('젖은수건이미지.png'); towel.alt='젖은수건'; sc.appendChild(towel);
-
-    // 드롭 성공 시 보일 정답 수건 (크기 60% + 좌표 보정)
-    const cloth = mk('img'); cloth.id='successCloth'; cloth.src=A('젖은수건정답이미지.png'); sc.appendChild(cloth);
-
-    // ---- parameters you asked (60% & offset left 2칸, up 1.5칸 느낌) ----
-    const SCALE = 0.60;
-    const OFF_X_RATIO = -0.055;  // 왼쪽으로 5.5%
-    const OFF_Y_RATIO = -0.040;  // 위로 4%
-    // ---------------------------------------------------------------
-
-    function layoutCloth(){
-      const r = pose.getBoundingClientRect();
-      cloth.style.display='block';
-      cloth.style.transform = `scale(${SCALE})`;
-      // 기준점을 왼쪽-가운데 쯤으로 가정
-      const x = r.left + r.width*0.44 + r.width*OFF_X_RATIO;
-      const y = r.top  + r.height*0.58 + r.height*OFF_Y_RATIO;
-      const scR = sc.getBoundingClientRect();
-      cloth.style.left = (x - scR.left) + 'px';
-      cloth.style.top  = (y - scR.top ) + 'px';
-    }
-
-    // 드롭존 = 낮은자세 그림 전체
-    let solved=false;
-
-    // basic pointer-drag
-    let sx=0, sy=0, ox=0, oy=0;
-    const start = (e)=>{
-      const p = (e.touches? e.touches[0]:e);
-      sx=p.clientX; sy=p.clientY;
-      const r=towel.getBoundingClientRect();
-      const s=sc.getBoundingClientRect();
-      ox=r.left-s.left; oy=r.top-s.top;
-      towel.classList.add('dragging');
-      e.preventDefault();
-    };
-    const move = (e)=>{
-      if(!towel.classList.contains('dragging')) return;
-      const p = (e.touches? e.touches[0]:e);
-      const dx=p.clientX-sx, dy=p.clientY-sy;
-      towel.style.left = (ox+dx)+'px';
-      towel.style.top  = (oy+dy)+'px';
-    };
-    const end = ()=>{
-      if(!towel.classList.contains('dragging')) return;
-      towel.classList.remove('dragging');
-      // hit test
-      const a = towel.getBoundingClientRect();
-      const b = pose.getBoundingClientRect();
-      const overlap = !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
-      if(overlap && !solved){
-        solved=true;
-        towel.remove();            // 수건 사라짐
-        layoutCloth();             // 정답 수건 표시
-        nextBtn.classList.remove('hidden');
-      }
-    };
-    towel.addEventListener('mousedown',start);
-    window.addEventListener('mousemove',move);
-    window.addEventListener('mouseup',end);
-    towel.addEventListener('touchstart',start,{passive:false});
-    window.addEventListener('touchmove',move,{passive:false});
-    window.addEventListener('touchend',end);
-
-    // 반응형 재배치
-    window.addEventListener('resize',()=>{ if(solved) layoutCloth(); });
+    // Clickable area = left half where stairs are
+    const zone = document.createElement('div');
+    zone.style.cssText='position:absolute;left:10vw;top:12vh;width:40vw;height:72vh;';
+    zone.addEventListener('click', (e)=>{
+      const rect = zone.getBoundingClientRect();
+      const cx = rect.left + rect.width*0.45;
+      const cy = rect.top + rect.height*0.5;
+      const r = Math.min(rect.width, rect.height)*0.35;
+      showCircle(cx,cy,r);
+      try{ okAudio.currentTime=0; okAudio.play(); }catch(e){}
+      // no further steps
+    }, {once:true});
+    stage.appendChild(zone);
   }
 
-  // ----------------- STEP 3 -----------------
-  function renderStep3(){
-    const sc = mk('div','scene'); stage.appendChild(sc);
-    const bg = mk('img','full'); bg.src=A('대피하기_계단_엘베.png'); sc.appendChild(bg);
+  // boot
+  preload(Object.keys(A), (resolved)=>{
+    // merge resolved urls
+    const R = {};
+    Object.keys(A).forEach(k=> R[k] = resolved[k] || (urlFor(A[k])[0] + `?v=${v}`));
+    okAudio.src = R.ok;
+    stage1(R);
+  });
 
-    // 클릭존 = 계단 네모 전체(오른쪽 패널) 추정값
-    const hit = mk('div'); hit.style.position='absolute'; hit.style.right='10%'; hit.style.top='12%'; hit.style.width='28%'; hit.style.height='68%'; hit.style.cursor='pointer'; hit.style.background='transparent'; sc.appendChild(hit);
-
-    let done=false;
-    hit.addEventListener('click',(e)=>{
-      if(done) return;
-      done=true;
-      const r = hit.getBoundingClientRect();
-      const s = sc.getBoundingClientRect();
-      const x = (r.left+s.left)/2 - s.left + r.width/2;
-      const y = r.top - s.top + r.height/2;
-      const d = Math.min(r.width,r.height)*0.9;
-      placeCircle(sc, x,y,d);
-      showToast('모두 정답입니다!');
-    },{once:true});
-  }
-
-  render();
 })();
